@@ -8,6 +8,8 @@ using System.Net;
 using System.Text;
 using System.Threading.Tasks;
 using System.Net.Http.Json;
+using PSNApiWrapper.Models;
+using Newtonsoft.Json;
 
 namespace PSNApiWrapper
 {
@@ -15,45 +17,23 @@ namespace PSNApiWrapper
     {
         public static readonly Uri GraphqlApiUri = new Uri("https://m.np.playstation.com/api/graphql/v1/op");
 
-        private PSNClient baseClient;
+        private PSNClient PSN;
 
         public GraphqlClient(PSNClient baseClient)
         {
-            this.baseClient = baseClient;
+            this.PSN = baseClient;
         }
 
-        internal async Task<HttpResponseMessage> SendRequest(Uri BaseUri, string operationName, string variables, string extensions)
+        private async Task<HttpContent> SendRequest(string operationName, Dictionary<string, object> variables, string sha256Hash)
         {
-            var accessToken = baseClient.GetAccessToken().Result;
-            var request = new HttpRequestMessage();
-
-            List<object> optionsList = new List<object>();
-            optionsList.Add("operationName=" + operationName);
-            optionsList.Add("variables=" + variables);
-            optionsList.Add("extensions=" + extensions);
-            string options = string.Join("&", optionsList);
-
-            request.RequestUri = new Uri(BaseUri, "?" + options);
-            request.Headers.Authorization = new AuthenticationHeaderValue("bearer", accessToken);
-
-            var response = await baseClient.Http.SendAsync(request);
-
-            Debug.Write("\nREQUEST: " + request);
-            Debug.Write("\nRESPONSE: " + response);
-
-            string errorContent = await response.Content.ReadAsStringAsync();
-            Console.WriteLine($"Error Content: {errorContent}");
-
-            switch (response.StatusCode)
+            List<object> requestParams = new List<object>
             {
-                case HttpStatusCode.OK:
-                    break;
+                "operationName=" + operationName,
+                "variables=" + JsonConvert.SerializeObject(variables),
+                $"extensions={{\"persistedQuery\":{{\"version\":1,\"sha256Hash\":\"{sha256Hash}\"}}}}"
+            };
 
-                case (HttpStatusCode)429:
-                    Debug.WriteLine(response.Headers);
-                    break;
-            }
-            return response;
+            return await PSN.SendGetRequest(GraphqlApiUri, "?" + string.Join("&", requestParams));
         }
 
         /// <summary>
@@ -62,29 +42,24 @@ namespace PSNApiWrapper
         /// <param name="searchTerm">The search term to search for </param>
         /// <param name="searchContext">The search context. for example "MobileUniversalSearchGame" or "MobileUniversalSearchSocial"</param>
         /// <param name="displayTitleLocale">The title locale, for example "en-US"</param>
-        public async Task<UniversalContextSearchResult> GetContextSearchResults(string searchTerm, string searchContext, string displayTitleLocale = "en-US")
+        public async Task<UniversalDomainSearchResponse> GetContextSearchResults(string searchTerm, string searchContext, string displayTitleLocale = "en-US")
         {
             // Search contexts:
             // MobileUniversalSearchGame
             // MobileUniversalSearchSocial
 
+            var variables = new Dictionary<string, object>
+            {
+                { "searchTerm", searchTerm },
+                { "searchContext", searchContext },
+                { "displayTitleLocale", displayTitleLocale }
+            };
 
-            string variables =
-                "{\"searchTerm\":\"" + searchTerm + "\"," +
-                "\"searchContext\":\"" + searchContext + "\"," +
-                "\"displayTitleLocale\":\"" + displayTitleLocale + "\"}";
+            var content = await SendRequest("metGetContextSearchResults", variables,
+                "a2fbc15433b37ca7bfcd7112f741735e13268f5e9ebd5ffce51b85acc126f41d");
 
-            string extensions = 
-                "{\"persistedQuery\":" + 
-                "{\"version\":1," + 
-                "\"sha256Hash\":\"a2fbc15433b37ca7bfcd7112f741735e13268f5e9ebd5ffce51b85acc126f41d\"}}";
-
-
-            var response = await SendRequest(GraphqlApiUri, "metGetContextSearchResults", variables, extensions);
-            Debug.WriteLine(await response.Content.ReadAsStringAsync());
-
-            SearchContextResultRoot root = await response.Content.ReadFromJsonAsync<SearchContextResultRoot>();
-            UniversalContextSearchResult searchResult = root.data.universalContextSearch.results[0];
+            SearchContextResultRoot root = await content.ReadFromJsonAsync<SearchContextResultRoot>();
+            UniversalDomainSearchResponse searchResult = root.data.universalContextSearch.results[0];
 
             return searchResult;
         }
@@ -96,34 +71,23 @@ namespace PSNApiWrapper
         /// </summary>
         /// <param name="npCommId">Unique ID of the title</param>
         /// <param name="trophyIds">Limit request to these specific trophy IDs</param>
-        public async Task<TrophyHintAvailabilityRetrieved> GetTrophiesWithGameHelpAvailableForTitle(string npCommId, string[] trophyIds = null)
+        public async Task<HintAvailability> GetTrophiesWithGameHelpAvailableForTitle(string npCommId, string[] trophyIds = null)
         {
-            string variables =
-                "{\"npCommId\":\"" + npCommId + "\"";
+            var variables = new Dictionary<string, object>
+            {
+                { "npCommId", npCommId }
+            };
 
             if (trophyIds != null)
             {
-                variables += ",\"trophyIds\":[";
-                for (int i = 0; i < trophyIds.Length; i++)
-                {
-                    variables += "\"" + trophyIds[i] + "\"";
-                    if (i != trophyIds.Length - 1)
-                        variables += ",";
-                }
-                variables += "]";
+                variables.Add("trophyIds", trophyIds);
             }
-            variables += "}";
 
-            string extensions =
-                "{\"persistedQuery\":" +
-                "{\"version\":1," +
-                "\"sha256Hash\":\"71bf26729f2634f4d8cca32ff73aaf42b3b76ad1d2f63b490a809b66483ea5a7\"}}";
+            var content = await SendRequest("metGetHintAvailability", variables,
+                "71bf26729f2634f4d8cca32ff73aaf42b3b76ad1d2f63b490a809b66483ea5a7");
 
-            var response = await SendRequest(GraphqlApiUri, "metGetHintAvailability", variables, extensions);
-            Debug.WriteLine(await response.Content.ReadAsStringAsync());
-
-            TrophyHintAvailabilityRoot root = await response.Content.ReadFromJsonAsync<TrophyHintAvailabilityRoot>();
-            TrophyHintAvailabilityRetrieved hints = root.data.hintAvailabilityRetrieve;
+            HintAvailabilityRoot root = await content.ReadFromJsonAsync<HintAvailabilityRoot>();
+            HintAvailability hints = root.data.hintAvailabilityRetrieve;
 
             return hints;
         }
@@ -132,29 +96,20 @@ namespace PSNApiWrapper
         /// Retrieves the Game Help which is available for a specific trophy.
         /// </summary>
         /// <param name="npCommId">Unique ID of the title the trophy belongs to	</param>
-        /// <param name="trophyId">ID of the trophy	</param>
-        /// <param name="udsObjectId">ID of the Game Help	</param>
-        /// <param name="helpType">Type of Game Help</param>
-        public async Task<TrophyTipsRetrieved> GetGameHelpForTrophy(string npCommId, string trophyId, string udsObjectId, string helpType)
+        /// <param name="trophies">Which trophies to retrieve help for</param>
+        public async Task<Tips> GetGameHelpForTrophy(string npCommId, HelpTrophiesParams[] trophies)
         {
-            // It is possible to request multiple trophies at once. 
-            // For the usecase I'm using it for that won't be the case, but implement in the future?
-            string variables =
-                "{\"npCommId\":\"" + npCommId +
-                "\",\"trophies\":[{\"trophyId\":\"" + trophyId +
-                "\",\"udsObjectId\":\"" + udsObjectId +
-                "\",\"helpType\":\"" + helpType + "\"}]}";
+            var variables = new Dictionary<string, object>
+            {
+                { "npCommId", npCommId },
+                { "trophies", trophies }
+            };
 
-            string extensions =
-                "{\"persistedQuery\":" + 
-                "{\"version\":1," + 
-                "\"sha256Hash\":\"93768752a9f4ef69922a543e2209d45020784d8781f57b37a5294e6e206c5630\"}}";
+            var content = await SendRequest("metGetTips", variables,
+                "93768752a9f4ef69922a543e2209d45020784d8781f57b37a5294e6e206c5630");
 
-            var response = await SendRequest(GraphqlApiUri, "metGetTips", variables, extensions);
-            Debug.WriteLine(await response.Content.ReadAsStringAsync());
-
-            TrophyTipRoot root = await response.Content.ReadFromJsonAsync<TrophyTipRoot>();
-            TrophyTipsRetrieved tips = root.data.tipsRetrieve;
+            TrophyTipsRoot root = await content.ReadFromJsonAsync<TrophyTipsRoot>();
+            Tips tips = root.data.tipsRetrieve;
 
             if (!tips.hasAccess)
             {
@@ -163,5 +118,12 @@ namespace PSNApiWrapper
 
             return tips;
         }
+
+        public async Task<Tips> GetGameHelpForTrophy(string npCommId, HelpTrophiesParams trophy)
+        {
+            return await GetGameHelpForTrophy(npCommId, new[] { trophy });
+        }
+
+        
     }
 }

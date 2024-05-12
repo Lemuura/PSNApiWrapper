@@ -70,6 +70,7 @@
     <Reference Include="System.ValueTuple, Version=4.0.3.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51, processorArchitecture=MSIL">
       <HintPath>..\packages\System.ValueTuple.4.5.0\lib\net47\System.ValueTuple.dll</HintPath>
     </Reference>
+    <Reference Include="System.Web" />
     <Reference Include="System.Xml.Linq" />
     <Reference Include="System.Data.DataSetExtensions" />
     <Reference Include="Microsoft.CSharp" />
@@ -80,11 +81,21 @@
   <ItemGroup>
     <Compile Include="AuthenticationClient.cs" />
     <Compile Include="GraphqlClient.cs" />
+    <Compile Include="Models\Authentication.cs" />
+    <Compile Include="Models\Pagination.cs" />
+    <Compile Include="Models\Params.cs" />
+    <Compile Include="Models\SearchContextResult.cs" />
+    <Compile Include="Models\Trophies.cs" />
+    <Compile Include="Models\TrophyGroups.cs" />
+    <Compile Include="Models\TrophyHintAvailability.cs" />
+    <Compile Include="Models\TrophySummary.cs" />
+    <Compile Include="Models\TrophyTips.cs" />
+    <Compile Include="Models\TrophyTitleBase.cs" />
+    <Compile Include="Models\TrophyTitles.cs" />
+    <Compile Include="Models\TrophyTypes.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="PSNClient.cs" />
-    <Compile Include="SearchClient.cs" />
     <Compile Include="TrophyClient.cs" />
-    <Compile Include="Types.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="app.config" />

@@ -11,6 +11,7 @@ using System.Net;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using System.Text.Json;
+using PSNApiWrapper.Models;
 
 namespace PSNApiWrapper
 {
@@ -20,51 +21,26 @@ namespace PSNApiWrapper
 
         private PSNClient PSN;
 
-        public Dictionary<string, TrophyTitleData> CachedPS5Titles = new Dictionary<string, TrophyTitleData>();
-        public Dictionary<string, TrophyTitleData> CachedOtherTitles = new Dictionary<string, TrophyTitleData>();
-
-        public Dictionary<string, TrophiesForTitleData> CachedTitleTrophies = new Dictionary<string, TrophiesForTitleData>();
+        public Dictionary<string, TrophyTitle> CachedPS5Titles = new Dictionary<string, TrophyTitle>();
+        public Dictionary<string, TrophyTitle> CachedOtherTitles = new Dictionary<string, TrophyTitle>();
+        public Dictionary<string, Trophies> CachedTitleTrophies = new Dictionary<string, Trophies>();
 
         public TrophyClient(PSNClient baseClient)
         {
             this.PSN = baseClient;
         }
 
-        internal async Task<HttpResponseMessage> SendRequest(Uri BaseUri, string RelativeUri, int? limit = null, int? offset = null, string serviceName = null)
+        private async Task<HttpContent> SendRequest(Uri BaseUri, string RelativeUri, int? limit = null, int? offset = null, string serviceName = null)
         {
-            var accessToken = PSN.GetAccessToken().Result;
-            var request = new HttpRequestMessage();
-
-            List<object> optionsList = new List<object>();
+            List<object> requestParams = new List<object>();
             if (serviceName != null)
-                optionsList.Add("npServiceName=" + serviceName);
+                requestParams.Add("npServiceName=" + serviceName);
             if (limit != null)
-                optionsList.Add("limit=" + limit);
+                requestParams.Add("limit=" + limit);
             if (offset != null)
-                optionsList.Add("offset=" + offset);
-            string options = string.Join("&", optionsList);
+                requestParams.Add("offset=" + offset);
 
-            request.RequestUri = new Uri(BaseUri, RelativeUri + "?" + options);
-            request.Headers.Authorization = new AuthenticationHeaderValue("bearer", accessToken);
-
-            var response = await PSN.Http.SendAsync(request);
-
-            Debug.Write("\nREQUEST: " + request);
-            Debug.Write("\nRESPONSE: " + response);
-
-            string content = await response.Content.ReadAsStringAsync();
-            Debug.WriteLine($"Content: {content}");
-
-            switch (response.StatusCode)
-            {
-                case HttpStatusCode.OK:
-                    break;
-
-                case (HttpStatusCode)429:
-                    Console.WriteLine(response.Headers);
-                    break;
-            }
-            return response;
+            return await PSN.SendGetRequest(BaseUri, RelativeUri + "?" + string.Join("&", requestParams));
         }
 
         /// <summary>
@@ -75,25 +51,24 @@ namespace PSNApiWrapper
         /// <param name="accountId">The account whos trophy list is being accessed. Use "me" for the authenticating account</param>
         /// <param name="limit">Limit the number of titles returned</param>
         /// <param name="offset">Returns title data from this result onwards</param>
-        public async Task<TrophyTitlesTotal> GetTrophyTitlesForUser(string accountId = "me", int? limit = null, int? offset = null)
+        public async Task<TrophyTitles> GetTrophyTitlesForUser(string accountId = "me", int? limit = null, int? offset = null)
         {
-            var response = await SendRequest(TrophyApiUri, "users/" + accountId + "/trophyTitles", limit, offset);
-
-            TrophyTitlesTotal trophies = await response.Content.ReadFromJsonAsync<TrophyTitlesTotal>();
+            var content = await SendRequest(TrophyApiUri, $"users/{accountId}/trophyTitles", limit, offset);
+            TrophyTitles titles = await content.ReadFromJsonAsync<TrophyTitles>();
 
             Console.Write("Titles found: ");
             Console.ForegroundColor = ConsoleColor.Green;
-            Console.Write(trophies.totalItemCount.ToString() + "\n");
+            Console.Write(titles.totalItemCount.ToString() + "\n");
             Console.ResetColor();
-            for (int i = 0; i < trophies.totalItemCount; i++)
+            for (int i = 0; i < titles.totalItemCount; i++)
             {
-                if (trophies.nextOffset != null && trophies.totalItemCount > trophies.nextOffset)
+                if (titles.nextOffset != null && titles.totalItemCount > titles.nextOffset)
                 {
                     PSN.WriteLine("Total amount of titles is bigger than the limit. Please provide a limit of up to 800. \n" +
                         "Support for pagination hasn't been added yet.\n", ConsoleColor.Red);
                     break;
                 }
-                var t = trophies.trophyTitles[i];
+                var t = titles.trophyTitles[i];
 
                 string adjustedName = SimplifyString(t.trophyTitleName);
 
@@ -120,7 +95,7 @@ namespace PSNApiWrapper
 
             }
 
-            return trophies;
+            return titles;
 
         }
 
@@ -149,7 +124,7 @@ namespace PSNApiWrapper
         /// "trophy2" for the PS5 platform</param>
         /// <param name="limit">Limit the number of trophies returned. If no limit is specified all trophies will be returned.</param>
         /// <param name="offset">Returns trophy data from this result onwards</param>
-        public async Task<TrophiesForTitleData> GetTrophiesForTitle(string npCommId, string groupId = "all", string serviceName = "trophy2", int? limit = null, int? offset = null)
+        public async Task<Trophies> GetTrophiesForTitle(string npCommId, string groupId = "all", string serviceName = "trophy2", int? limit = null, int? offset = null)
         {
             if (groupId.Equals("all", StringComparison.OrdinalIgnoreCase) && CachedTitleTrophies.TryGetValue(npCommId, out var trophies))
             {
@@ -160,9 +135,9 @@ namespace PSNApiWrapper
                 "npCommunicationIds/" + npCommId +
                 "/trophyGroups/" + groupId +
                 "/trophies";
-            var response = await SendRequest(TrophyApiUri, subUri, limit, offset, serviceName);
+            var content = await SendRequest(TrophyApiUri, subUri, limit, offset, serviceName);
 
-            TrophiesForTitleData data = await response.Content.ReadFromJsonAsync<TrophiesForTitleData>();
+            Trophies data = await content.ReadFromJsonAsync<Trophies>();
 
             Console.Write("Trophies for " + npCommId + ": ");
             Console.ForegroundColor = ConsoleColor.Green;
@@ -213,16 +188,12 @@ namespace PSNApiWrapper
         /// "trophy2" for the PS5 platform</param>
         /// <param name="limit">Limit the number of trophies returned. If no limit is specified all trophies will be returned.</param>
         /// <param name="offset">Returns trophy data from this result onwards</param>
-        public async Task<TrophiesForTitleData> GetTrophiesEarnedForTitle(string npCommId, string accountId = "me", string groupId = "all", string serviceName = "trophy2", int? limit = null, int? offset = null)
+        public async Task<Trophies> GetTrophiesEarnedForTitle(string npCommId, string accountId = "me", string groupId = "all", string serviceName = "trophy2", int? limit = null, int? offset = null)
         {
-            string subUri =
-                "users/" + accountId +
-                "/npCommunicationIds/" + npCommId +
-                "/trophyGroups/" + groupId +
-                "/trophies";
-            var response = await SendRequest(TrophyApiUri, subUri, limit, offset, serviceName);
+            string relativeUri = $"users/{accountId}/npCommunicationIds/{npCommId}/trophyGroups/{groupId}/trophies";
+            var content = await SendRequest(TrophyApiUri, relativeUri, limit, offset, serviceName);
 
-            TrophiesForTitleData data = await response.Content.ReadFromJsonAsync<TrophiesForTitleData>();
+            Trophies data = await content.ReadFromJsonAsync<Trophies>();
 
             for (int i = 0; i < data.totalItemCount; i++)
             {
@@ -247,11 +218,11 @@ namespace PSNApiWrapper
         /// progress towards the next level and which tier their current level falls in to. 
         /// </summary>
         /// <param name="accountId">The account whos trophy list is being accessed. Use "me" for the authenticating account</param>
-        public async Task<TrophySummaryData> GetTrophyProfileSummaryForUser(string accountId = "me")
+        public async Task<TrophySummary> GetTrophyProfileSummaryForUser(string accountId = "me")
         {
-            var response = await SendRequest(TrophyApiUri, "users/" + accountId + "/trophySummary");
+            var content = await SendRequest(TrophyApiUri, $"users/{accountId}/trophySummary");
 
-            TrophySummaryData data = await response.Content.ReadFromJsonAsync<TrophySummaryData>();
+            TrophySummary data = await content.ReadFromJsonAsync<TrophySummary>();
 
             Debug.WriteLine(
                 "AccountID: " + data.accountId +
@@ -277,9 +248,9 @@ namespace PSNApiWrapper
         /// "trophy2" for the PS5 platform</param>
         public async void GetTrophyGroupsForTitle(string npCommId, string serviceName = "trophy2")
         {
-            var response = await SendRequest(TrophyApiUri, "npCommunicationIds/" + npCommId + "/trophyGroups", null, null, serviceName);
+            var content = await SendRequest(TrophyApiUri, $"npCommunicationIds/{npCommId}/trophyGroups", null, null, serviceName);
 
-            TitleTrophyGroupsData data = await response.Content.ReadFromJsonAsync<TitleTrophyGroupsData>();
+            TrophyGroups data = await content.ReadFromJsonAsync<TrophyGroups>();
 
             Debug.WriteLine(
                 "SetVersion: " + data.trophySetVersion +
@@ -321,10 +292,10 @@ namespace PSNApiWrapper
         /// "trophy2" for the PS5 platform</param>
         public async void GetTrophySummaryInTitleForUserByTrophyGroup(string npCommId, string accountId = "me", string serviceName = "trophy2")
         {
-            var response = await SendRequest(
-                TrophyApiUri, "users/" + accountId + "/npCommunicationIds/" + npCommId + "/trophyGroups", null, null, serviceName);
+            var content = await SendRequest(
+                TrophyApiUri, $"users/{accountId}/npCommunicationIds/{npCommId}/trophyGroups", null, null, serviceName);
 
-            TrophyGroupSummaryData data = await response.Content.ReadFromJsonAsync<TrophyGroupSummaryData>();
+            TrophyGroupSummaryData data = await content.ReadFromJsonAsync<TrophyGroupSummaryData>();
 
             Debug.WriteLine(
                 "SetVersion: " + data.trophySetVersion +
